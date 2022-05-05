@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (modes js)
+ (preprocess (pps js_of_ocaml-ppx ppx_let ppx_jane ppx_css))
+ (libraries core nonsai_test bonsai.web))
