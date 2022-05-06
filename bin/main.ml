@@ -171,12 +171,12 @@ module Dag = struct
           View.group
             [
               Vdom.Node.div
-                ~attr:(Vdom.Attr.many [Vdom.Attr.on_click (Fn.const (toggle_collapsed id));
-
-                Vdom.Attr.class_ Styles.pointer
-
-
-          ])
+                ~attr:
+                  (Vdom.Attr.many
+                     [
+                       Vdom.Attr.on_click (Fn.const (toggle_collapsed id));
+                       Vdom.Attr.class_ Styles.pointer;
+                     ])
                 [ View.text [%string "%{(Id.to_string id)} %{deps}"] ];
               content;
             ]
