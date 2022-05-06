@@ -36,6 +36,9 @@ module Styles =
 
 .group {
   border-style: dotted;
+}
+
+.pointer {
   cursor: pointer;
 }
 
@@ -84,16 +87,8 @@ module View = struct
 
   let text s = Vdom.Node.text s
 
-  let group ~(toggle_collapsed : unit Effect.t) children =
-    div
-      ~attr:
-        (many
-           [
-             class_ Styles.vbox;
-             class_ Styles.group;
-             on_click (Fn.const toggle_collapsed);
-           ])
-      children
+  let group children =
+    div ~attr:(many [ class_ Styles.vbox; class_ Styles.group ]) children
 
   let none = Vdom.Node.none
 end
@@ -173,10 +168,17 @@ module Dag = struct
             | true -> View.none
             | false -> to_view ~collapsed ~toggle_collapsed contents
           in
-
-          View.group ~toggle_collapsed:(toggle_collapsed id)
+          View.group
             [
-              View.text [%string "%{(Id.to_string id)} %{deps}"]; content;
+              Vdom.Node.div
+                ~attr:(Vdom.Attr.many [Vdom.Attr.on_click (Fn.const (toggle_collapsed id));
+
+                Vdom.Attr.class_ Styles.pointer
+
+
+          ])
+                [ View.text [%string "%{(Id.to_string id)} %{deps}"] ];
+              content;
             ]
     in
 
@@ -224,14 +226,25 @@ let groups =
   let atom = atom [ id group1; id group2; id group3 ] in
   [ atom; group1; group2; group3 ]
 
+let tiny_group_with_transform origin =
+  let open Node in
+  let source = origin in
+  let transform = atom [ id source ] in
+  let transform2 = atom [ id source; id transform ] in
+  group [ transform; transform2 ]
+
 let group_with_external_deps =
   let open Node in
   let source = atom [] in
-  let transform = atom [ id source ] in
-  let transform2 = atom [ id source; id transform ] in
-  let group = group [ transform; transform2 ] in
+  let group = tiny_group_with_transform source in
   let top = atom [ id group ] in
   [ top; group; source ]
+
+let nested_groups =
+  let open Node in
+  let outer_group = group group_with_external_deps in
+  let transform = atom [ id outer_group ] in
+  [ transform; outer_group ]
 
 let examples : (string * Dag.t) list =
   [
@@ -239,6 +252,7 @@ let examples : (string * Dag.t) list =
     ("example2", example2);
     ("groups", groups);
     ("group with external deps", group_with_external_deps);
+    ("nested groups", nested_groups);
   ]
 
 let component =
