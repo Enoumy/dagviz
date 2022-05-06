@@ -36,8 +36,7 @@ module Styles =
 
 .group {
   border-style: dotted;
-  border-radius: 5px
-  cursor : pointer;
+  cursor: pointer;
 }
 
 |}]
@@ -164,8 +163,10 @@ module Dag = struct
   let rec to_view ~(collapsed : Id.Set.t)
       ~(toggle_collapsed : Id.t -> unit Effect.t) (t : t) : View.t =
     let node_to_view (node : Node.t) : View.t =
+      let deps = Node.dependencies node |> Id.Set.sexp_of_t |> Sexp.to_string in
       match node with
-      | Atom { id; _ } -> View.hbox [ View.text (Id.to_string id) ]
+      | Atom { id; _ } ->
+          View.hbox [ View.text [%string "%{(Id.to_string id)} %{deps}"] ]
       | Group { contents; id } ->
           let content =
             match Set.mem collapsed id with
@@ -174,7 +175,9 @@ module Dag = struct
           in
 
           View.group ~toggle_collapsed:(toggle_collapsed id)
-            [ View.text (Id.to_string id); content ]
+            [
+              View.text [%string "%{(Id.to_string id)} %{deps}"]; content;
+            ]
     in
 
     let topological_sort = topological_sort t in
@@ -221,8 +224,22 @@ let groups =
   let atom = atom [ id group1; id group2; id group3 ] in
   [ atom; group1; group2; group3 ]
 
+let group_with_external_deps =
+  let open Node in
+  let source = atom [] in
+  let transform = atom [ id source ] in
+  let transform2 = atom [ id source; id transform ] in
+  let group = group [ transform; transform2 ] in
+  let top = atom [ id group ] in
+  [ top; group; source ]
+
 let examples : (string * Dag.t) list =
-  [ ("example1", example1); ("example2", example2); ("groups", groups) ]
+  [
+    ("example1", example1);
+    ("example2", example2);
+    ("groups", groups);
+    ("group with external deps", group_with_external_deps);
+  ]
 
 let component =
   let%sub collapsed, toggle_collapsed =
