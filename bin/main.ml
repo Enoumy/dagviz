@@ -34,22 +34,13 @@ module Styles =
   
 }
 
+.group {
+  border-style: dotted;
+  border-radius: 5px
+  cursor : pointer;
+}
+
 |}]
-
-module View = struct
-  type t = Vdom.Node.t
-
-  open Vdom.Node
-  open Vdom.Attr
-
-  let hbox children =
-    div ~attr:(many [ class_ Styles.hbox; class_ Styles.card ]) children
-
-  let vbox children =
-    div ~attr:(many [ class_ Styles.vbox; class_ Styles.card ]) children
-
-  let text s = Vdom.Node.text s
-end
 
 let id_count = ref 0
 
@@ -80,6 +71,34 @@ end = struct
     Int.to_string !id_count
 end
 
+module View = struct
+  type t = Vdom.Node.t
+
+  open Vdom.Node
+  open Vdom.Attr
+
+  let hbox children =
+    div ~attr:(many [ class_ Styles.hbox; class_ Styles.card ]) children
+
+  let vbox children =
+    div ~attr:(many [ class_ Styles.vbox; class_ Styles.card ]) children
+
+  let text s = Vdom.Node.text s
+
+  let group ~(toggle_collapsed : unit Effect.t) children =
+    div
+      ~attr:
+        (many
+           [
+             class_ Styles.vbox;
+             class_ Styles.group;
+             on_click (Fn.const toggle_collapsed);
+           ])
+      children
+
+  let none = Vdom.Node.none
+end
+
 module Node = struct
   type t =
     | Atom of { id : Id.t; children : Id.t list }
@@ -88,6 +107,7 @@ module Node = struct
 
   let id = function Atom { id; _ } -> id | Group { id; _ } -> id
   let atom children = Atom { id = Id.create (); children }
+  let group contents = Group { id = Id.create (); contents }
 
   let rec dependencies (t : t) : Id.Set.t =
     match t with
@@ -106,16 +126,24 @@ module Dag = struct
   type t = Node.t list [@@deriving sexp]
 
   let topological_sort (t : t) : Node.t list list =
-    let am_i_dependency_free ~(me : Node.t) ~(others : Node.t list) : bool =
-      List.exists others ~f:(fun peer ->
-          let is_equal = Id.equal (Node.id me) (Node.id peer) in
-
-          let depends_on_me =
-            lazy
-              (let peer_dependencies = Node.dependencies peer in
-               Set.mem peer_dependencies (Node.id me))
-          in
-          (not is_equal) && not (Lazy.force depends_on_me))
+    let does_anything_depend_on_me ~(me : Node.t) ~(others : Node.t list) : bool
+        =
+      let ans =
+        not
+          (List.exists others ~f:(fun peer ->
+               let depends_on_me =
+                 let peer_dependencies = Node.dependencies peer in
+                 Set.mem peer_dependencies (Node.id me)
+               in
+               depends_on_me))
+      in
+      print_s
+        [%message
+          "does_anything_depend_on_me"
+            (me : Node.t)
+            (others : Node.t list)
+            (ans : bool)];
+      ans
     in
 
     let rec loop ~(acc : Node.t list list) (values_to_sort : Node.t list) =
@@ -124,7 +152,7 @@ module Dag = struct
       | _ -> (
           let curr_top_level, remaining_values =
             List.partition_tf values_to_sort ~f:(fun value ->
-                am_i_dependency_free ~me:value ~others:values_to_sort)
+                does_anything_depend_on_me ~me:value ~others:values_to_sort)
           in
           match curr_top_level with
           | [] -> failwith "cycle... i think?"
@@ -133,21 +161,30 @@ module Dag = struct
 
     loop ~acc:[] t
 
-  let rec to_view (t : t) : View.t =
+  let rec to_view ~(collapsed : Id.Set.t)
+      ~(toggle_collapsed : Id.t -> unit Effect.t) (t : t) : View.t =
     let node_to_view (node : Node.t) : View.t =
       match node with
       | Atom { id; _ } -> View.hbox [ View.text (Id.to_string id) ]
       | Group { contents; id } ->
-          View.vbox [ View.text (Id.to_string id); to_view contents ]
+          let content =
+            match Set.mem collapsed id with
+            | true -> View.none
+            | false -> to_view ~collapsed ~toggle_collapsed contents
+          in
+
+          View.group ~toggle_collapsed:(toggle_collapsed id)
+            [ View.text (Id.to_string id); content ]
     in
 
     let topological_sort = topological_sort t in
+    print_s [%message (topological_sort : Node.t list list)];
     View.hbox
       (List.map topological_sort ~f:(fun level ->
            View.vbox (List.map level ~f:node_to_view)))
 end
 
-let example : Dag.t =
+let example1 : Dag.t =
   let open Node in
   let source1 = atom [] in
   let source2 = atom [] in
@@ -155,13 +192,58 @@ let example : Dag.t =
   let transform2 = atom [ id transform1 ] in
   [ source1; source2; transform1; transform2 ]
 
+let example2 : Dag.t =
+  let open Node in
+  let source1 = atom [] in
+  let source2 = atom [] in
+  let source3 = atom [] in
+  let transform1 = atom [ id source1; id source2; id source3 ] in
+  let transform2 = atom [ id transform1 ] in
+  let transform2' = atom [ id transform1 ] in
+  let transform3 = atom [ id transform2; id source3 ] in
+  let transform3' = atom [ id transform2; id source2 ] in
+  [
+    source1;
+    source2;
+    transform1;
+    transform2;
+    source3;
+    transform3;
+    transform2';
+    transform3';
+  ]
+
+let groups =
+  let open Node in
+  let group1 = group example1 in
+  let group2 = group example1 in
+  let group3 = group example2 in
+  let atom = atom [ id group1; id group2; id group3 ] in
+  [ atom; group1; group2; group3 ]
+
+let examples : (string * Dag.t) list =
+  [ ("example1", example1); ("example2", example2); ("groups", groups) ]
+
 let component =
-  let%sub state, _set_state =
-    Bonsai.state [%here] (module Int) ~default_model:1
+  let%sub collapsed, toggle_collapsed =
+    Bonsai.state_machine0 [%here]
+      (module Id.Set)
+      (module Id)
+      ~default_model:Id.Set.empty
+      ~apply_action:(fun ~inject:_ ~schedule_event:_ collapsed toggle_id ->
+        match Set.mem collapsed toggle_id with
+        | false -> Set.add collapsed toggle_id
+        | true -> Set.remove collapsed toggle_id)
   in
-  let%arr _state = state in
-  print_s [%message (example : Dag.t)];
-  Dag.to_view example
+  let%arr collapsed = collapsed and toggle_collapsed = toggle_collapsed in
+  Vdom.Node.div
+    (List.map examples ~f:(fun (name, dag) ->
+         Vdom.Node.div
+           ~attr:(Vdom.Attr.class_ Styles.vbox)
+           [
+             Vdom.Node.h3 [ Vdom.Node.text name ];
+             Dag.to_view ~collapsed ~toggle_collapsed dag;
+           ]))
 
 let (_ : _ Start.Handle.t) =
   Start.start Start.Result_spec.just_the_view ~bind_to_element_with_id:"app"
