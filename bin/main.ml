@@ -21,13 +21,20 @@ module Styles =
 let id_count = ref 0
 
 module Id : sig
-  type t
+  module T : sig
+    type t [@@deriving compare, sexp]
+  end
+
+  include T
+  include module type of Comparable.Make (T)
 
   val create : unit -> t
   val to_string : t -> string
   val of_string : string -> t
 end = struct
-  type t = string
+  module T = String
+  include T
+  include Comparable.Make (T)
 
   let to_string = Fn.id
   let of_string = Fn.id
@@ -40,9 +47,30 @@ end
 
 module Node = struct
   type t =
-    | Atom of { id : Id.t; chilldren : string list }
-    | Group of { note : string; contents : t list }
+    | Atom of { id : Id.t; children : Id.t list }
+    | Group of { id : Id.t; contents : t list }
+
+  let id = function Atom { id; _ } -> id | Group { id; _ } -> id
+  let atom children = Atom { id = Id.create (); children }
+
+  let rec depends_on (t : t) : Id.Set.t =
+    let _t = t in
+    Id.Set.empty
 end
+
+module Dag = struct
+  type t = Node.t list
+
+  let topological_sort (t : t) P Node.t list list
+end
+
+let _example =
+  let open Node in
+  let source1 = atom [] in
+  let source2 = atom [] in
+  let transform1 = atom [ id source1; id source2 ] in
+  let transform2 = atom [ id transform1 ] in
+  [ source1; source2; transform1; transform2 ]
 
 let component =
   let%sub state, _set_state =
